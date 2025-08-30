@@ -1,5 +1,5 @@
 import React, { useState, useEffect, _useCallback } from 'react';
-import { AlertTriangle, DollarSign, Calendar, User, CheckCircle, XCircle, Plus, Eye, Edit, Search, Filter, X } from 'lucide-react';
+import { AlertTriangle, DollarSign, Calendar, User, CheckCircle, XCircle, Plus, Eye, Edit, Search, Filter, X, Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
@@ -64,6 +64,7 @@ const SanctionManagement = () => {
   const [selectedSanction, setSelectedSanction] = useState(null);
   const [errors, setErrors] = useState([]);
   const [actionLoading, setActionLoading] = useState({});
+  const [formLoading, setFormLoading] = useState(false);
   const [formData, setFormData] = useState({
     user_id: '',
     type: 'amende',
@@ -77,6 +78,28 @@ const SanctionManagement = () => {
   const canManageSanctions = hasAnyRole(['administrateur', 'bibliothecaire']);
   const canViewSanctions = hasAnyRole(['administrateur', 'bibliothecaire']);
   const isStudent = user?.role === 'emprunteur';
+
+  // Fonction pour nettoyer les données du formulaire selon le type
+  const cleanFormData = (data) => {
+    const cleanedData = { ...data };
+    
+    // Nettoyer les champs non pertinents selon le type
+    if (data.type !== 'amende') {
+      delete cleanedData.montant;
+    }
+    if (data.type !== 'suspension') {
+      delete cleanedData.date_fin;
+    }
+    
+    // Supprimer les champs vides
+    Object.keys(cleanedData).forEach(key => {
+      if (cleanedData[key] === '' || cleanedData[key] === null || cleanedData[key] === undefined) {
+        delete cleanedData[key];
+      }
+    });
+    
+    return cleanedData;
+  };
 
   // Fonction pour gérer les erreurs
   const handleApiError = (error, defaultMessage = 'Une erreur est survenue') => {
@@ -135,6 +158,14 @@ const SanctionManagement = () => {
       loadUsers();
     }
   }, [canManageSanctions]);
+
+  // Réinitialiser le formulaire quand le dialogue se ferme
+  useEffect(() => {
+    if (!showAddDialog) {
+      resetForm();
+      clearErrors();
+    }
+  }, [showAddDialog]);
 
   const loadSanctions = async () => {
     try {
@@ -202,10 +233,21 @@ const SanctionManagement = () => {
   };
 
   const handleFormChange = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
+    setFormData(prev => {
+      const newData = { ...prev, [field]: value };
+      
+      // Réinitialiser les champs conditionnels quand le type change
+      if (field === 'type') {
+        if (value !== 'amende') {
+          newData.montant = '';
+        }
+        if (value !== 'suspension') {
+          newData.date_fin = '';
+        }
+      }
+      
+      return newData;
+    });
   };
 
   const resetForm = () => {
@@ -223,11 +265,15 @@ const SanctionManagement = () => {
   const handleAddSanction = async (e) => {
     e.preventDefault();
     clearErrors();
+    setFormLoading(true);
+    
     try {
-      const response = await apiService.createSanction(formData);
+      // Nettoyer les données avant envoi
+      const cleanedData = cleanFormData(formData);
+      
+      const response = await apiService.createSanction(cleanedData);
       if (response.success) {
         setShowAddDialog(false);
-        resetForm();
         loadSanctions();
       } else {
         handleApiError({ response: { data: response } }, 'Erreur lors de la création de la sanction');
@@ -235,6 +281,8 @@ const SanctionManagement = () => {
     } catch (error) {
       console.error('Erreur lors de l\'ajout de la sanction:', error);
       handleApiError(error, 'Erreur réseau lors de l\'ajout de la sanction');
+    } finally {
+      setFormLoading(false);
     }
   };
 
@@ -379,49 +427,91 @@ const SanctionManagement = () => {
             <DialogTrigger asChild>
               <Button className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700">
                 <Plus className="h-4 w-4" />
-                Ajouter une sanction
+                <span className="hidden sm:inline">Ajouter une sanction</span>
+                <span className="sm:hidden">Ajouter</span>
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Ajouter une nouvelle sanction</DialogTitle>
-                <DialogDescription>
-                  Créez une nouvelle sanction pour un utilisateur.
-                </DialogDescription>
-              </DialogHeader>
-              <form onSubmit={handleAddSanction} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="user_id">Utilisateur *</Label>
-                    <Select value={formData.user_id} onValueChange={(value) => handleFormChange('user_id', value)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Sélectionner un utilisateur" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {users.map((userItem) => (
-                          <SelectItem key={userItem.id} value={userItem.id.toString()}>
-                            {userItem.prenom} {userItem.nom} ({userItem.email})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+            <DialogContent className="w-[95vw] max-w-2xl max-h-[95vh] overflow-y-auto p-0">
+              <div className="p-6">
+                <DialogHeader className="mb-6">
+                  <DialogTitle className="text-xl font-bold">Ajouter une nouvelle sanction</DialogTitle>
+                  <DialogDescription className="text-gray-600">
+                    Créez une nouvelle sanction pour un utilisateur.
+                  </DialogDescription>
+                </DialogHeader>
+                
+                <form onSubmit={handleAddSanction} className="space-y-6">
+                  {/* Section Utilisateur et Type */}
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="user_id" className="text-sm font-medium text-gray-900">
+                          Utilisateur <span className="text-red-500">*</span>
+                        </Label>
+                        <Select 
+                          value={formData.user_id} 
+                          onValueChange={(value) => handleFormChange('user_id', value)}
+                          required
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Sélectionner un utilisateur" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {users.map((userItem) => (
+                              <SelectItem key={userItem.id} value={userItem.id.toString()}>
+                                <div className="flex flex-col">
+                                  <span className="font-medium">{userItem.prenom} {userItem.nom}</span>
+                                  <span className="text-sm text-gray-500">{userItem.email}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <Label htmlFor="type" className="text-sm font-medium text-gray-900">
+                          Type de sanction <span className="text-red-500">*</span>
+                        </Label>
+                        <Select 
+                          value={formData.type} 
+                          onValueChange={(value) => handleFormChange('type', value)}
+                          required
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="amende">
+                              <div className="flex items-center gap-2">
+                                <DollarSign className="h-4 w-4" />
+                                <span>Amende</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="suspension">
+                              <div className="flex items-center gap-2">
+                                <XCircle className="h-4 w-4" />
+                                <span>Suspension</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="avertissement">
+                              <div className="flex items-center gap-2">
+                                <AlertTriangle className="h-4 w-4" />
+                                <span>Avertissement</span>
+                              </div>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <Label htmlFor="type">Type *</Label>
-                    <Select value={formData.type} onValueChange={(value) => handleFormChange('type', value)}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="amende">Amende</SelectItem>
-                        <SelectItem value="suspension">Suspension</SelectItem>
-                        <SelectItem value="avertissement">Avertissement</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+
+                  {/* Section Montant (conditionnel) */}
                   {formData.type === 'amende' && (
-                    <div>
-                      <Label htmlFor="montant">Montant (FCFA) *</Label>
+                    <div className="space-y-2 p-4 bg-red-50 rounded-lg border border-red-200">
+                      <Label htmlFor="montant" className="text-sm font-medium text-gray-900">
+                        Montant (FCFA) <span className="text-red-500">*</span>
+                      </Label>
                       <Input
                         id="montant"
                         type="number"
@@ -429,108 +519,161 @@ const SanctionManagement = () => {
                         min="0"
                         value={formData.montant}
                         onChange={(e) => handleFormChange('montant', e.target.value)}
+                        placeholder="Entrez le montant de l'amende"
+                        className="w-full"
                         required
                       />
                     </div>
                   )}
-                  <div>
-                    <Label htmlFor="date_debut">Date de début *</Label>
+
+                  {/* Section Raison */}
+                  <div className="space-y-2">
+                    <Label htmlFor="raison" className="text-sm font-medium text-gray-900">
+                      Raison <span className="text-red-500">*</span>
+                    </Label>
                     <Input
-                      id="date_debut"
-                      type="date"
-                      value={formData.date_debut}
-                      onChange={(e) => handleFormChange('date_debut', e.target.value)}
+                      id="raison"
+                      type="text"
+                      value={formData.raison}
+                      onChange={(e) => handleFormChange('raison', e.target.value)}
+                      placeholder="Motif de la sanction"
+                      className="w-full"
                       required
                     />
                   </div>
-                  {formData.type === 'suspension' && (
-                    <div>
-                      <Label htmlFor="date_fin">Date de fin</Label>
-                      <Input
-                        id="date_fin"
-                        type="date"
-                        value={formData.date_fin}
-                        onChange={(e) => handleFormChange('date_fin', e.target.value)}
-                      />
+
+                  {/* Section Dates */}
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="date_debut" className="text-sm font-medium text-gray-900">
+                          Date de début <span className="text-red-500">*</span>
+                        </Label>
+                        <Input
+                          id="date_debut"
+                          type="date"
+                          value={formData.date_debut}
+                          onChange={(e) => handleFormChange('date_debut', e.target.value)}
+                          className="w-full"
+                          required
+                        />
+                      </div>
+                      
+                      {formData.type === 'suspension' && (
+                        <div className="space-y-2">
+                          <Label htmlFor="date_fin" className="text-sm font-medium text-gray-900">
+                            Date de fin
+                          </Label>
+                          <Input
+                            id="date_fin"
+                            type="date"
+                            value={formData.date_fin}
+                            onChange={(e) => handleFormChange('date_fin', e.target.value)}
+                            className="w-full"
+                            min={formData.date_debut}
+                          />
+                          <p className="text-xs text-gray-500">
+                            Laissez vide pour une suspension indéterminée
+                          </p>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-                <div>
-                  <Label htmlFor="raison">Raison *</Label>
-                  <Input
-                    id="raison"
-                    value={formData.raison}
-                    onChange={(e) => handleFormChange('raison', e.target.value)}
-                    placeholder="Ex: Retard de livre, Dégradation..."
-                    required
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="description">Description</Label>
-                  <Textarea
-                    id="description"
-                    value={formData.description}
-                    onChange={(e) => handleFormChange('description', e.target.value)}
-                    placeholder="Détails supplémentaires..."
-                    rows={3}
-                  />
-                </div>
-                <DialogFooter>
-                  <DialogClose asChild>
-                    <Button type="button" variant="outline">Annuler</Button>
-                  </DialogClose>
-                  <Button type="submit">Créer la sanction</Button>
-                </DialogFooter>
-              </form>
+                  </div>
+
+                  {/* Section Description */}
+                  <div className="space-y-2">
+                    <Label htmlFor="description" className="text-sm font-medium text-gray-900">
+                      Description détaillée
+                    </Label>
+                    <Textarea
+                      id="description"
+                      value={formData.description}
+                      onChange={(e) => handleFormChange('description', e.target.value)}
+                      placeholder="Détails supplémentaires sur la sanction..."
+                      className="w-full min-h-[100px] resize-y"
+                      rows={4}
+                    />
+                  </div>
+
+                  {/* Boutons d'action */}
+                  <DialogFooter className="flex flex-col sm:flex-row gap-3 pt-6">
+                    <DialogClose asChild>
+                      <Button 
+                        type="button" 
+                        variant="outline" 
+                        className="w-full sm:w-auto order-2 sm:order-1"
+                        disabled={formLoading}
+                      >
+                        Annuler
+                      </Button>
+                    </DialogClose>
+                    <Button 
+                      type="submit" 
+                      className="w-full sm:w-auto order-1 sm:order-2 bg-blue-600 hover:bg-blue-700"
+                      disabled={formLoading}
+                    >
+                      {formLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Création en cours...
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="h-4 w-4 mr-2" />
+                          Créer la sanction
+                        </>
+                      )}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </div>
             </DialogContent>
           </Dialog>
         )}
       </div>
 
-      {/* Filtres et recherche - Améliorés pour la responsivité */}
-      <div className="bg-white p-4 rounded-lg shadow-sm border">
+      {/* Barre de recherche et filtres - Améliorée */}
+      <div className="bg-white p-4 rounded-lg border shadow-sm">
         <form onSubmit={handleSearchSubmit} className="space-y-4">
-          <div className="flex flex-col lg:flex-row gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-              <Input
-                type="text"
-                placeholder={isStudent ? "Rechercher dans vos sanctions..." : "Rechercher par utilisateur, raison..."}
-                value={searchTerm}
-                onChange={handleSearchChange}
-                className="pl-9 pr-3 py-2 w-full"
-              />
-            </div>
-            <div className="flex flex-col sm:flex-row gap-4">
-              <Select onValueChange={handleTypeFilter} value={selectedType}>
-                <SelectTrigger className="w-full sm:w-[180px]">
-                  <Filter className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Filtrer par type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tous les types</SelectItem>
-                  <SelectItem value="amende">Amende</SelectItem>
-                  <SelectItem value="suspension">Suspension</SelectItem>
-                  <SelectItem value="avertissement">Avertissement</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select onValueChange={handleStatusFilter} value={selectedStatus}>
-                <SelectTrigger className="w-full sm:w-[180px]">
-                  <CheckCircle className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Filtrer par statut" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tous les statuts</SelectItem>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="payee">Payée</SelectItem>
-                  <SelectItem value="annulee">Annulée</SelectItem>
-                  <SelectItem value="expiree">Expirée</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button type="submit" variant="outline" className="w-full sm:w-auto">
-                Appliquer les filtres
-              </Button>
-            </div>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <Input
+              type="text"
+              placeholder="Rechercher par raison, utilisateur..."
+              value={searchTerm}
+              onChange={handleSearchChange}
+              className="pl-9 pr-3 py-2 w-full"
+            />
+          </div>
+          <div className="flex flex-col sm:flex-row gap-4">
+            <Select onValueChange={handleTypeFilter} value={selectedType}>
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <Filter className="h-4 w-4 mr-2" />
+                <SelectValue placeholder="Filtrer par type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous les types</SelectItem>
+                <SelectItem value="amende">Amende</SelectItem>
+                <SelectItem value="suspension">Suspension</SelectItem>
+                <SelectItem value="avertissement">Avertissement</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select onValueChange={handleStatusFilter} value={selectedStatus}>
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <CheckCircle className="h-4 w-4 mr-2" />
+                <SelectValue placeholder="Filtrer par statut" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous les statuts</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="payee">Payée</SelectItem>
+                <SelectItem value="annulee">Annulée</SelectItem>
+                <SelectItem value="expiree">Expirée</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button type="submit" variant="outline" className="w-full sm:w-auto">
+              Appliquer les filtres
+            </Button>
           </div>
         </form>
       </div>
@@ -676,7 +819,7 @@ const SanctionManagement = () => {
 
       {/* Dialog de détails - Amélioré */}
       <Dialog open={showDetailsDialog} onOpenChange={setShowDetailsDialog}>
-        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] sm:max-w-[600px] max-h-[95vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold flex items-center gap-2">
               <AlertTriangle className="h-6 w-6 text-red-600" />
